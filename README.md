@@ -9,12 +9,11 @@ SQLite bindings for the Dart VM
 Add the library to your specs:
 ```
 dependencies:
-  sqlite: ^0.5.0
+  sqlite2: ^0.5.0
 ```
 
 ## Documentation
 
-See [the examples](example/) for how to use the library and the
+See [the examples](https://github.com/l7ssha/dart-sqlite2/tree/master/example/) for how to use the library and the
 [pub.dartlang.org](https://pub.dartlang.org/packages/sqlite2) page for the API
 documentation.
-
