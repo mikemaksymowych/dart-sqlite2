@@ -19,10 +19,10 @@ PLATFORM := $(shell uname -s)
 G++_OPTIONS :=
 GCC_OPTIONS :=
 ifeq ($(PLATFORM),Darwin)
-  G++_OPTIONS = -arch $(MACOS_ARCH)
+  G++_OPTIONS = -arch $(MACOS_ARCH) -DDART_SHARED_LIB
   GCC_OPTIONS = -Wl,-install_name,libdart_sqlite.dylib,-undefined,dynamic_lookup -o lib/src/libdart_sqlite.dylib
 else ifeq ($(PLATFORM),Linux)
-  G++_OPTIONS = -m$(LINUX_ARCH)
+  G++_OPTIONS = -m$(LINUX_ARCH) -DDART_SHARED_LIB
   GCC_OPTIONS = -Wl,-soname,libdart_sqlite.so -o lib/src/libdart_sqlite.so
 else
   $(error Unsupported platform $(PLATFORM))
@@ -45,7 +45,7 @@ endif
 
 build: check-dart-sdk
 	mkdir -p out
-	g++ -fPIC -I $(DART_SDK)/include -c lib/src/dart_sqlite.cc $(G++_OPTIONS) -o out/dart_sqlite.o
+	g++ -fPIC -I$(DART_SDK)/include $(G++_OPTIONS) -c lib/src/dart_sqlite.cc -o out/dart_sqlite.o
 	gcc -shared $(GCC_OPTIONS) out/dart_sqlite.o -lsqlite3
 
 test: check-dart-sdk build

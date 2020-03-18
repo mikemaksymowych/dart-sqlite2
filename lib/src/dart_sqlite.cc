@@ -21,12 +21,11 @@
 Dart_NativeFunction ResolveName(Dart_Handle name, int argc, bool* auto_setup_scope);
 
 static Dart_PersistentHandle library;
-static Dart_PersistentHandle ptr_class_p;
 
 typedef struct {
   sqlite3* db;
   sqlite3_stmt* stmt;
-  Dart_WeakPersistentHandle finalizer;
+  bool insert;
 } statement_peer;
 
 DART_EXPORT Dart_Handle dart_sqlite_Init(Dart_Handle parent_library) {
@@ -36,11 +35,6 @@ DART_EXPORT Dart_Handle dart_sqlite_Init(Dart_Handle parent_library) {
   if (Dart_IsError(result_code)) return result_code;
 
   library = Dart_NewPersistentHandle(parent_library);
-
-  Dart_Handle class_name = Dart_NewStringFromCString("_RawPtrImpl");
-  Dart_Handle ptr_class = Dart_CreateNativeWrapperClass(parent_library,
-          class_name, 1);
-  ptr_class_p = Dart_NewPersistentHandle(ptr_class);
 
   return parent_library;
 }
@@ -61,14 +55,14 @@ Dart_Handle CheckDartError(Dart_Handle result) {
 }
 
 sqlite3* get_db(Dart_Handle db_handle) {
-  intptr_t db_addr;
-  Dart_GetNativeInstanceField(db_handle, 0, &db_addr);
+  uint64_t db_addr;
+  Dart_IntegerToUint64(db_handle, &db_addr);
   return (sqlite3*) db_addr;
 }
 
 statement_peer* get_statement(Dart_Handle statement_handle) {
-  intptr_t statement_addr;
-  Dart_GetNativeInstanceField(statement_handle, 0, &statement_addr);
+  uint64_t statement_addr;
+  Dart_IntegerToUint64(statement_handle, &statement_addr);
   return (statement_peer*) statement_addr;
 }
 
@@ -82,8 +76,7 @@ DART_FUNCTION(New) {
   CheckDartError(Dart_StringToCString(path, &cpath));
   CheckSqlError(db, sqlite3_open(cpath, &db));
   sqlite3_busy_timeout(db, 100);
-  CheckDartError(result = Dart_Allocate(Dart_HandleFromPersistent(ptr_class_p)));
-  Dart_SetNativeInstanceField(result, 0, (intptr_t) db);
+  CheckDartError(result = Dart_NewIntegerFromUint64((uint64_t) db));
   DART_RETURN(result);
 }
 
@@ -108,7 +101,7 @@ DART_FUNCTION(Version) {
   DART_RETURN(Dart_NewStringFromCString(sqlite3_version));
 }
 
-void finalize_statement(void* isolate_callback_data, Dart_WeakPersistentHandle handle, void* peer) {
+void finalize_statement(void* peer) {
   static bool warned = false;
   statement_peer* statement = (statement_peer*) peer;
   sqlite3_finalize(statement->stmt);
@@ -141,10 +134,9 @@ DART_FUNCTION(PrepareStatement) {
   statement_peer* peer = (statement_peer*) sqlite3_malloc(sizeof(statement_peer));
   peer->db = db;
   peer->stmt = stmt;
+  peer->insert = strcasestr(sql, "insert") != NULL;
 
-  CheckDartError(result = Dart_Allocate(Dart_HandleFromPersistent(ptr_class_p)));
-  Dart_SetNativeInstanceField(result, 0, (intptr_t) peer);
-  peer->finalizer = Dart_NewWeakPersistentHandle(result, peer, 0, finalize_statement);
+  CheckDartError(result = Dart_NewIntegerFromUint64((uint64_t) peer));
   DART_RETURN(result);
 }
 
@@ -282,10 +274,15 @@ DART_FUNCTION(Step) {
         fprintf(stderr, "Got sqlite_locked\n");
         continue; // TODO: have to roll back transaction?
       case SQLITE_DONE:
-        // Note: sqlite3_changes will stil return a non-0 value for statements
-        // which don't affect rows (e.g. SELECT). It simply returns the number
-        // of changes by the last row-altering statement.
-        DART_RETURN(Dart_NewInteger(sqlite3_changes(statement->db)));
+        if (statement->insert) {
+          // Return last row id for insert
+          DART_RETURN(Dart_NewIntegerFromUint64(sqlite3_last_insert_rowid(statement->db)));
+        } else {
+          // Note: sqlite3_changes will stil return a non-0 value for statements
+          // which don't affect rows (e.g. SELECT). It simply returns the number
+          // of changes by the last row-altering statement.
+          DART_RETURN(Dart_NewInteger(sqlite3_changes(statement->db)));
+        }
       case SQLITE_ROW:
         DART_RETURN(get_last_row(statement));
       default:
@@ -300,7 +297,6 @@ DART_FUNCTION(CloseStatement) {
 
   statement_peer* statement = get_statement(statement_handle);
   CheckSqlError(statement->db, sqlite3_finalize(statement->stmt));
-  Dart_DeleteWeakPersistentHandle(Dart_CurrentIsolate(), statement->finalizer);
   sqlite3_free(statement);
   DART_RETURN(Dart_Null());
 }
